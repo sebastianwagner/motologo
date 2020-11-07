@@ -2,8 +2,11 @@ use std::env::args;
 use motologo::parse_params;
 use std::fs;
 use std::io::{Cursor, BufRead};
-use byteorder::{ReadBytesExt, LittleEndian, BigEndian};
+use byteorder::{ReadBytesExt, LittleEndian};
 
+/**
+ * @thx @ https://github.com/eriktim/moto-bootlogo.git; mlichvar et. al
+ */
 fn main() {
     const MOTO_LOGO: &'static[u8; 9] = b"MotoLogo\0";
     const TABLE_ITEM_NAME_LENGTH: u8 = 24;
@@ -19,48 +22,48 @@ fn main() {
     let mut rdr = Cursor::new(data);
     rdr.set_position(9);
     let table_padding_start = rdr.read_u16::<LittleEndian>().unwrap();
-    println!("table padding start {} 0x{:x?}", table_padding_start, table_padding_start);
-    println!("table length {} 0x{:x?}", table_padding_start - 0x0d, table_padding_start - 0x0d);
+    println!("# table padding start {} 0x\"{:04x?}\"(le)", table_padding_start, table_padding_start.to_be());
+    print!("# table length {} with {} slots", table_padding_start - 0x0d, (table_padding_start - 0x0d)/32);
     assert!(table_padding_start <= TABLE_MAX_LENGTH);
-    println!("{} bytes left in table ({} slots)", TABLE_MAX_LENGTH - table_padding_start, (TABLE_MAX_LENGTH - table_padding_start) / 32 );
+    println!(" {} bytes left ({} slots)", TABLE_MAX_LENGTH - table_padding_start, (TABLE_MAX_LENGTH - table_padding_start) / 32 );
     rdr.set_position(0xd);
     let table_start :u16 = rdr.position() as u16;
     let mut table_item_start = table_start;
-    println!("start: {} item_start: {} padding starts at: {}.", table_start, table_item_start, table_padding_start);
-    let mut valid = true;
-    let mut last_image_offset: u16 = 0;
-    println!("post before loop {} 0x{:x?}", rdr.position(), rdr.position());
-    while valid && table_item_start + 32 <= table_padding_start {
+    println!();
+    let mut last_image_offset = 0;
+    let mut last_image_end = table_padding_start.into();
+    while table_item_start + 32 <= table_padding_start {
         let table_item_start_size = table_item_start as usize;
         let table_item_name_end_size = (table_item_start + TABLE_ITEM_NAME_LENGTH as u16) as usize;
         let mut table_item_name: [u8; TABLE_ITEM_NAME_LENGTH as usize] = Default::default();
         table_item_name.copy_from_slice(&rdr.get_ref()[table_item_start_size..table_item_name_end_size]);
         let table_item_name_str = std::str::from_utf8(&table_item_name).unwrap();
         let table_item_name_str = table_item_name_str.trim_matches(char::from(0));
-        println!("{}: {}", table_item_name_str, table_item_start);
-        //println!("position in loop {} 0x{:x?} taking {}", rdr.position(), rdr.position(), TABLE_ITEM_NAME_LENGTH);
         rdr.consume(TABLE_ITEM_NAME_LENGTH as usize);
-        //println!("position in loop {} 0x{:x?} took {}", rdr.position(), rdr.position(), TABLE_ITEM_NAME_LENGTH);
-        let table_item_byte25 = rdr.read_u8().unwrap();
-        valid = valid && table_item_byte25 == 0;
-        //println!("{:x?} {}", table_item_byte25, table_item_byte25);
-        let image_offset = rdr.read_u16::<BigEndian>().unwrap();
+        let image_offset = rdr.read_u32::<LittleEndian>().unwrap();
+        assert!(image_offset > TABLE_MAX_LENGTH.into());
+        // address byte aligned?
+        assert_eq!(0, image_offset % 256);
+        if last_image_end > table_padding_start.into() {
+            // info for last image
+            println!(" with {:3} bytes left", image_offset - last_image_end);
+        }
+        print!("{:24}", table_item_name_str);
         if image_offset <= last_image_offset {
-            println!("image offset before last image found until now.");
+            println!("### image offset before last image offset ###");
+        } else if image_offset <= last_image_end {
+            println!("### image offset before last image ended ###");
         }
         last_image_offset = image_offset;
-        assert!(image_offset > TABLE_MAX_LENGTH);
-        println!("image offset at pos {} 0x{:x?} val 0x{:x?} ({})", rdr.position(), rdr.position(), image_offset, image_offset);
-        let table_item_byte28 = rdr.read_u8().unwrap();
-        valid = valid && table_item_byte28 == 0;
-        let something = rdr.read_u16::<BigEndian>().unwrap();
-        //assert!(image_offset > TABLE_MAX_LENGTH);
-        println!("something(size?) at pos {} 0x{:x?} val 0x{:x?} ({})", rdr.position(), rdr.position(), something, something);
-        //println!("{:x?} {:x?}", &rdr.get_ref()[table_item_name_end_size+4], &rdr.get_ref()[table_item_name_end_size+5]);
-        rdr.consume(2);
-        //println!("position in loop {} 0x{:x?}", rdr.position(), rdr.position());
-        //println!("end of loop position {}", rdr.position() as u16);
+        print!(" # offset byte {:7} 0x\"{:08x}\"(le in hexdump) at position 0x{:08x}(be)", image_offset, image_offset.to_be(), image_offset);
+        let image_length = rdr.read_u32::<LittleEndian>().unwrap();
+        print!(", length {:6} bytes seen as hexdump \"0x{:08x?}\"(le)", image_length, image_length.to_be());
+        let image_end = image_offset + image_length;
+        last_image_end = image_end;
+        print!(", image end at byte 0x{:08x?}", image_end);
+        // all remaining bytes in table padding until first image are 0xff
         table_item_start += 32;
     }
-    assert!(valid);
+    println!();
+    // all remaining bytes for padding after last image are zero
 }
