@@ -3,8 +3,8 @@ use motologo::parse_params;
 use std::fs;
 use std::io::{Cursor, BufRead};
 use byteorder::{ReadBytesExt, LittleEndian};
-struct TableItem {
-    name: String,
+struct TableDescriptor {
+    //name: &str,
     offset: u32,
     length: u32,
 }
@@ -31,7 +31,7 @@ fn main() {
     let table_length = table_padding_start - TABLE_START as u32;
     let table_padding_length = TABLE_MAX_LENGTH as u32 - table_padding_start;
     let table_item_count = (table_length / TABLE_ITEM_LENGTH as u32) as u16;
-    let mut _table_items :Vec<TableItem> = Vec::with_capacity(table_item_count as usize);
+    let mut table_items :Vec<TableDescriptor> = Vec::with_capacity(table_item_count as usize);
     let table_padding_slot_count = (table_padding_length / TABLE_ITEM_LENGTH as u32) as u16;
     println!("# table 0xff padding start {} 0x\"{:04x?}\"(le)", table_padding_start, table_padding_start.to_be());
     print!("# table length {} bytes with {} slots", table_length, table_item_count);
@@ -66,6 +66,12 @@ fn main() {
         last_image_offset = image_offset;
         print!(" # offset byte {:7} 0x\"{:08x}\"(le in hexdump) at position 0x{:08x}(be)", image_offset, image_offset.to_be(), image_offset);
         let image_length = rdr.read_u32::<LittleEndian>().unwrap();
+        let table_item = TableDescriptor {
+            //name: table_item_name_str,
+            offset: image_offset,
+            length: image_length
+        };
+        table_items.push(table_item);
         print!(", length {:6} bytes seen as hexdump \"0x{:08x?}\"(le)", image_length, image_length.to_be());
         let image_end = image_offset + image_length;
         last_image_end = image_end;
