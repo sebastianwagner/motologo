@@ -1,11 +1,13 @@
 use std::env::args;
 use motologo::parse_params;
 use std::fs;
-use std::io::{Cursor, BufRead};
+use std::io::{Cursor, Read};
 use byteorder::{ReadBytesExt, LittleEndian};
 struct TableDescriptor {
-    //name: &str,
+    #[allow(dead_code)]
+    name: String,
     offset: u32,
+    #[allow(dead_code)]
     length: u32,
 }
 /**
@@ -13,10 +15,19 @@ struct TableDescriptor {
  */
 fn main() {
     const MOTO_LOGO: &'static[u8; 9] = b"MotoLogo\0";
-    const TABLE_ITEM_NAME_LENGTH: u8 = 24;
+    const TABLE_ITEM_NAME_LENGTH: usize = 24;
     const TABLE_ITEM_LENGTH :u8 = 32;
     const TABLE_START: u8 = 0x0d;
     const TABLE_MAX_LENGTH: u16 = 0x03ff; // 1024 - 1
+    fn read_table_descriptor_name(reader: &mut impl Read) -> String {
+        let buffer = &mut [0; TABLE_ITEM_NAME_LENGTH];
+        let _read = reader.read(buffer);
+        let buffer_str = std::str::from_utf8(buffer).unwrap();
+        let buffer_str_trim = buffer_str.trim_matches(b'\0' as char);
+        let mut buf = String::with_capacity(buffer_str_trim.len());
+        buf.push_str(&buffer_str_trim);
+        buf
+    }
     let args: Vec<String> = args().collect();
     let sliced_args: &[String] = &args;
     let (_query, filename) = parse_params(sliced_args);
@@ -44,11 +55,11 @@ fn main() {
     while (table_item_start + TABLE_ITEM_LENGTH as u32) <= table_padding_start {
         let table_item_start_size = table_item_start as usize;
         let table_item_name_end_size = (table_item_start + TABLE_ITEM_NAME_LENGTH as u32) as usize;
-        let mut table_item_name: [u8; TABLE_ITEM_NAME_LENGTH as usize] = Default::default();
+        let mut table_item_name: [u8; TABLE_ITEM_NAME_LENGTH] = Default::default();
         table_item_name.copy_from_slice(&rdr.get_ref()[table_item_start_size..table_item_name_end_size]);
         let table_item_name_str = std::str::from_utf8(&table_item_name).unwrap();
-        let table_item_name_str = table_item_name_str.trim_matches(char::from(0));
-        rdr.consume(TABLE_ITEM_NAME_LENGTH as usize);
+        let _table_item_name_str = table_item_name_str.trim_matches(char::from(0));
+        let read_buffer = read_table_descriptor_name(&mut rdr);
         let image_offset = rdr.read_u32::<LittleEndian>().unwrap();
         assert!(image_offset > TABLE_MAX_LENGTH.into());
         // address byte aligned?
@@ -57,20 +68,20 @@ fn main() {
             // info for last image
             println!(" with {:3} bytes left", image_offset - last_image_end);
         }
-        print!("{:24}", table_item_name_str);
+        print!("{:24}", read_buffer);
         if image_offset <= last_image_offset {
             println!("### image offset before last image offset ###");
         } else if image_offset <= last_image_end {
             println!("### image offset before last image ended ###");
         }
         last_image_offset = image_offset;
-        print!(" # offset byte {:7} 0x\"{:08x}\"(le in hexdump) at position 0x{:08x}(be)", image_offset, image_offset.to_be(), image_offset);
         let image_length = rdr.read_u32::<LittleEndian>().unwrap();
         let table_item = TableDescriptor {
-            //name: table_item_name_str,
+            name: read_buffer,
             offset: image_offset,
-            length: image_length
+            length: image_length,
         };
+        print!(" # offset byte {:7} 0x\"{:08x}\"(le in hexdump) at position 0x{:08x}(be)", table_item.offset, table_item.offset.to_be(), table_item.offset);
         table_items.push(table_item);
         print!(", length {:6} bytes seen as hexdump \"0x{:08x?}\"(le)", image_length, image_length.to_be());
         let image_end = image_offset + image_length;
